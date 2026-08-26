@@ -11,6 +11,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.core.edit
@@ -27,6 +28,18 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+//uses flow from coroutine for instant updates
+//uses hilt which is dependency injection
+//uses datastore for persistent key-value storage
+//uses state hoisting for crash-free compose previews
+/*
+Etiket              Nereye Konur?            Ne İşe Yarar?
+@AndroidEntryPoint  Activity / Fragmenta     Bu ekranda Hilt ile ViewModel ve bağımlılık alınmasını sağlar.
+hiltViewModel()     Composable içine         Hilt tarafından oluşturulan ViewModel'i Compose ekranına bağlar.
+collectAsState()    Flow değişkenine         Flow akışını Compose State'ine çevirerek ekranı otomatik günceller.
+LocalContext.current Composable içine        DataStore ve sistem kaynakları için güvenli Context sağlar.
+*/
 
 val Context.dataStore by preferencesDataStore(name = "user_prefs")
 
@@ -54,6 +67,7 @@ class MainAct : ComponentActivity() {
     }
 
     suspend fun fetchUser(): String {
+        //coroutine
         return withContext(Dispatchers.IO) {
             delay(1000)
             "Dwayne"
@@ -67,6 +81,9 @@ class MainAct : ComponentActivity() {
         }
     }
 
+
+    //flow fonksiyon defineı verilirken
+    //no need to scope.launch() method call
     fun countDownFlow(): Flow<Int> = flow {
         for (i in 10 downTo 1) {
             emit(i)
@@ -74,18 +91,19 @@ class MainAct : ComponentActivity() {
         }
     }.flowOn(Dispatchers.Default)
 
-    suspend fun saveName(name: String) {
-        dataStore.edit { preferences ->
+    suspend fun saveName(context: Context, name: String) {
+        context.dataStore.edit { preferences ->
             preferences[USER_NAME_KEY] = name
         }
     }
 
-    val userNameFlow: Flow<String>
-        get() = dataStore.data.map { preferences ->
+    fun getUserNameFlow(context: Context): Flow<String> {
+        return context.dataStore.data.map { preferences ->
             preferences[USER_NAME_KEY] ?: "Unknown"
         }
+    }
 
-    // 1. Stateful Ekran (Hilt ve ViewModel ile konuşur)
+    // 1. Stateful Composable (ViewModel & Hilt integration)
     @Composable
     fun MainScreen(viewModel: Hilt = hiltViewModel()) {
         val postList by viewModel.allPosts.collectAsState(initial = emptyList())
@@ -95,24 +113,19 @@ class MainAct : ComponentActivity() {
             postList = postList,
             post = post,
             onHiltClick = { viewModel.LoadPost() },
-            onRoomClick = { viewModel.fetchAndSavePost() },
-            onAsyncClick = {
-                fetchUser()
-                fetchData()
-                fetchAge()
-            }
+            onRoomClick = { viewModel.fetchAndSavePost() }
         )
     }
 
-    // 2. Stateless Ekran (Sadece arayüzü çizer, ViewModel bağımsızdır)
+    // 2. Stateless Composable (Pure UI drawing, decouples from ViewModel)
     @Composable
     fun MainScreenContent(
         postList: List<PostEntity>,
         post: RetrofitPost?,
         onHiltClick: () -> Unit,
-        onRoomClick: () -> Unit,
-        onAsyncClick: suspend () -> Unit
+        onRoomClick: () -> Unit
     ) {
+        val context = LocalContext.current
         val scope = rememberCoroutineScope()
         var placeholder by remember { mutableStateOf("Placeholder") }
 
@@ -124,7 +137,7 @@ class MainAct : ComponentActivity() {
                     val data = async { fetchData() }
                     val age = async { fetchAge() }
                     placeholder = "User: ${user.await()}, Data: ${data.await()}, Age: ${age.await()}"
-                    saveName(user.await())
+                    saveName(context, user.await())
                 }
             }) {
                 Text(text = "Async / DataStore: $placeholder")
@@ -146,7 +159,7 @@ class MainAct : ComponentActivity() {
                 Text("Retrofit Tek Başına Çek")
             }
 
-            // Hilt Butonu
+            // Hilt Button
             Button(
                 modifier = Modifier.padding(top = 8.dp),
                 onClick = onHiltClick
@@ -161,7 +174,7 @@ class MainAct : ComponentActivity() {
                 )
             }
 
-            // Room / Offline-First Butonu
+            // Room / Offline-First Button
             Button(
                 modifier = Modifier.padding(top = 16.dp),
                 onClick = onRoomClick
@@ -169,7 +182,7 @@ class MainAct : ComponentActivity() {
                 Text(text = "DAO Çek ve Room'a Kaydet (Offline-First)")
             }
 
-            // Room Kayıtları
+            // Room Records
             postList.forEach { p ->
                 Text(
                     text = "Room'dan (#${p.id}): ${p.title}\n${p.body}",
@@ -188,7 +201,7 @@ class MainAct : ComponentActivity() {
         }
     }
 
-    // 3. Preview (Sahte veriyle çökmeden çizilir)
+    // 3. Design-Time Preview (Safe from Hilt missing container errors)
     @Preview(showBackground = true)
     @Composable
     fun MainScreenPreview() {
@@ -202,8 +215,7 @@ class MainAct : ComponentActivity() {
                 postList = samplePosts,
                 post = samplePost,
                 onHiltClick = {},
-                onRoomClick = {},
-                onAsyncClick = {}
+                onRoomClick = {}
             )
             flowscreen()
         }
